@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/10694898.svg)](https://zenodo.org/badge/latestdoi/10694898)
+
 # SRT for Cylindrical Apertures
 Implementation of the spherical Radon transform (SRT) that exploits a cylindrical measurement aperture geometry for computational efficiency.
 
