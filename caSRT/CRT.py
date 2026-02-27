@@ -1,5 +1,4 @@
-# Copyright (c) 2022, Washington University in St. Louis.
-#
+# Copyright (c) 2026, The University of Texas at Austin
 # All Rights reserved.
 # See file COPYRIGHT for details.
 #
@@ -19,12 +18,12 @@ class CircularRadonTransform:
     """
     %CircularRadonTransform  Creates a 2D spherical Radon tomography test problem
     %
-    % This function genetates a tomography test problem based on the spherical
+    % This function genetates a tomography test problem based on the circular
     % Radon tranform where data consists of integrals along circles.  This type
     % of problem arises, e.g., in photoacoustic imaging.
     %
-    % The image domain is a square centered at the origin.  The centers for the
-    % integration circles are placed on a circle just outside the image domain.
+    % The image domain is a square centered at the origin with length L.  The centers for the
+    % integration circles are placed on a circle of radius R
     % For each circle center we integrate along a number of concentric circles
     % with equidistant radii, using the periodic trapezoidal rule.
     %
@@ -33,28 +32,27 @@ class CircularRadonTransform:
     % Input:
     %   N           Scalar denoting the number of pixels in each dimesion, such
     %               that the image domain consists of N^2 cells.
+    %   L           Dimension of FOV
+    %   R           Radius of detection geometry. Default = sqrt(2)/2*L
     %   angles      Vector containing the angles to the circle centers in
     %               radians. Default: angles = 2*pi*(0:2:358)/360.
     %   numCircles  Number of concentric integration circles for each center.
     %               Default: numCircles = round(sqrt(2)*N).
-    %   asMatrix    If True, a sparse matrix is returned in A (default).
-    %               If False, instead a function handle is returned.
-    %
     % Output:
     %   A           If input isMatrix is True (default): coefficient matrix with
     %               N^2 columns and length(angles)*numCircles rows.
-    %               If input isMatrix is False: A function handle representing a
-    %               matrix-free version of A in which the forward and backward
-    %               operations are computed as A.fwd(x) and A.bwd(y),
-    %               respectively, for column vectors x and y of appropriate size.
-    %               The matrix is never formed explicitly, thus saving memory.
+    %               The matrix assumes that the image is vectorized with the fastest
+    %               running index corresponding to the x-axis.
+    %               
     %
     %
     % Based on Matlab code written: Per Christian Hansen, Jakob Sauer Jorgensen, and 
     % Maria Saxild-Hansen, 2010-2017 & Juergen Frikel, OTH Regensburg.
     """
-    def __init__(self, N,angles=None,numCircles=None,asMatrix=True):
+    def __init__(self,N,L,R,angles=None,numCircles=None):
         self.N = N
+        self.L = L
+        self.R = R
         # Default value of the angles to the circle centers.
         if angles is None:
             self.angles = np.arange(0, 359, 2)*np.pi/180.
@@ -66,90 +64,72 @@ class CircularRadonTransform:
         else:
             self.numCircles = int( numCircles )
             
-        if asMatrix:
-            self.A = self._get_or_apply_system_matrix(self.N, self.angles, self.numCircles)
-        else:
-            self.A = None
+        self.A = self._get_system_matrix(self.N, L, R, self.angles, self.numCircles)
+
             
         self.shape = [self.numCircles*self.angles.shape[0], self.N*self.N]
             
     def fwd(self, x):
-        if self.A is not None:
             return self.A*(x)
-        else:
-            return self._get_or_apply_system_matrix(self.N,self.angles,self.numCircles, x, False)
+
         
     def bwd(self, y):
-        if self.A is not None:
             return self.A.T*y
-        else:
-            return self._get_or_apply_system_matrix(self.N,self.angles,self.numCircles, y, True)
+
             
-    def _get_or_apply_system_matrix(self, N, angles, numCircles, u=None, adjoint=None):
+    def _get_system_matrix(self, N, L, R, angles, numCircles):
         # Define the number of angles.
         nA = angles.shape[0]
         
         # Radii for the circles.
-        radii  = np.linspace(0,np.sqrt(6),numCircles+1)
+        min_radius = R - 0.5*np.sqrt(2)*L
+        max_radius = R + 0.5*np.sqrt(2)*L
+        radii  = np.linspace(min_radius, max_radius,numCircles+1)
         radii  = radii[1:]
 
         # Image coordinates.
-        centerImg = np.ceil(N/2)
+        centerImg = np.floor(N/2)
 
         # Determine the quarature parameters.
-        dx = np.sqrt(2.)/N
+        dx = L/N
         nPhi = np.ceil((4.*np.pi/dx)*radii)
         dPhi = 2*np.pi/nPhi
         
         II = np.arange(nA)
         JJ = np.arange(numCircles)
-        
-        if u is None:
-            isMatrix = True
-        else:
-            isMatrix = False
 
 
-        if isMatrix:
-            # Initialize vectors that contains the row numbers, the column numbers
-            # and the values for creating the matrix A effiecently.
-            nnz = int(2*N*nA*numCircles)
-            rows = np.zeros( nnz, dtype=np.int32)
-            cols = np.zeros( nnz, dtype=np.int32)
-            vals = np.zeros( nnz, dtype=np.float64)
+        # Initialize vectors that contains the row numbers, the column numbers
+        # and the values for creating the matrix A effiecently.
+        nnz = int(2*N*nA*numCircles)
+        rows = np.zeros( nnz, dtype=np.int32)
+        cols = np.zeros( nnz, dtype=np.int32)
+        vals = np.zeros( nnz, dtype=np.float64)
             
-            idxend = 0
+        idxend = 0
 
-        else:
-            if adjoint == False:
-                assert u.shape[0] == self.N*self.N
-                A = np.zeros(numCircles*nA, dtype=np.float64)
-            else:
-                assert u.shape[0] == numCircles*nA
-                A = np.zeros(self.N*self.N, dtype=np.float64)
-    
         # Loop over angles.
         for m in II: 
             # Angular position of source.
-            xix = np.cos(angles[m])
-            xiy = np.sin(angles[m])
+            xix = R*np.cos(angles[m])
+            xiy = R*np.sin(angles[m])
     
             # Loop over the circles.
             for n in JJ:
                 # (x,y) coordinates of circle.
                 k = np.arange(nPhi[n])*dPhi[n]
-                xx = (xix + radii[n]*np.cos(k))/dx + centerImg
-                yy = (xiy + radii[n]*np.sin(k))/dx + centerImg
+                xx = (xix + radii[n]*np.cos(k))
+                yy = (xiy + radii[n]*np.sin(k))
         
                 # Round to get pixel index.
-                col = np.round( xx )-1
-                row = np.round( yy )-1
+                pixel_x_index = np.round( xx/dx )+centerImg-1
+                pixel_y_index = np.round( yy/dx )+centerImg-1
         
                 # Discard if outside box domain.
-                IInew = np.logical_and(col>=0, col<N) & np.logical_and(row>=0, row<N)
-                row = row[IInew]
-                col = col[IInew]
-                J = (N-row-1) + col*N
+                IInew = np.logical_and(pixel_x_index>=0, pixel_x_index<N) & np.logical_and(pixel_y_index>=0, pixel_y_index<N)
+                pixel_x_index = pixel_x_index[IInew]
+                pixel_y_index = pixel_y_index[IInew]
+                J = pixel_x_index + pixel_y_index*N     # Ordering in contiguous wrt x
         
                 # Convert to linear index and bin
                 Ju, w = np.unique(J, return_counts=True)
@@ -162,32 +142,25 @@ class CircularRadonTransform:
         
                 # Store the values, if any.
                 if jj.shape[0] > 0:
-                    if isMatrix:
-                        # Create the indices to store the values to vector for
-                        # later creation of A matrix.
-                        idxstart = idxend
-                        idxend = idxstart + jj.shape[0]
-                        idx = np.arange(idxstart, idxend)
+                    # Create the indices to store the values to vector for
+                    # later creation of A matrix.
+                    idxstart = idxend
+                    idxend = idxstart + jj.shape[0]
+                    idx = np.arange(idxstart, idxend)
                 
-                        # Store row numbers, column numbers and values.
-                        rows[idx] = ii
-                        cols[idx] = jj
-                        vals[idx] = aa
-                    else:
-                        # If any nonzero elements, apply forward or back operator
-                        if adjoint==False:
-                            A[i] = np.dot(aa, u[jj])
-                        else:
-                            A[jj] += u[i]*aa
+                    # Store row numbers, column numbers and values.
+                    rows[idx] = ii
+                    cols[idx] = jj
+                    vals[idx] = aa
+
                             
-        if isMatrix:
-            # Truncate excess zeros.
-            rows = rows[:idxend]
-            cols = cols[:idxend]
-            vals = vals[:idxend]
+        # Truncate excess zeros.
+        rows = rows[:idxend]
+        cols = cols[:idxend]
+        vals = vals[:idxend]
     
-            # Create sparse matrix A from the stored values.
-            A = scs.csr_matrix((vals, (rows,cols)), (self.numCircles*nA,self.N*self.N) )/np.sqrt(2)
+        # Create sparse matrix A from the stored values.
+        A = scs.csr_matrix((vals, (rows,cols)), (self.numCircles*nA,self.N*self.N) )
         return A
 
 
@@ -196,13 +169,12 @@ class CircularRadonTransform_ZR:
     """
     %CircularRadonTransform_ZR  Helper circular radon test problem
     %
-    % This function genetates a tomography test problem based on the spherical
-    % Radon tranform where data consists of integrals along circles.  This type
+    % This function genetates a tomography test problem based on the circular
+    % Radon transform where data consists of integrals along circles.  This type
     % of problem arises, e.g., in photoacoustic imaging.
     %
-    % The image domain is a square centered at along the x-axis and starting at 
-    % 0 in the y axis. The centers for the integration circles are placed 
-    % in a column with y-position 0. 
+    % The image domain is a rectangle with z in [-0.5H, .5H] and r in [min_radius max_radius].
+    % The centers for the integration circles are placed at r = 0 and z = heights
     % For each circle center we integrate along a number of concentric circles
     % with equidistant radii, using the periodic trapezoidal rule.
     %
@@ -210,116 +182,100 @@ class CircularRadonTransform_ZR:
     %
     %
     % Input:
-    %   N           Scalar denoting the number of pixels in the z-dimension
-    %   Nx          Scalar denoting the number of pixels in the x and y 
-    %               directions such that the image domain consists of N*Nx
-    %   heights     Vector containing the column heights assuming the z
-    for the circle centers in
-    %               radians. Default: angles = 2*pi*(0:2:358)/360.
+    %   Nz           Scalar denoting the number of pixels in the z-dimension
+    %   Nr          Scalar denoting the number of pixels in the radial 
+    %               directions such that the image domain consists of Nz*Nr
+    %   heights     Vector containing the normalized column heights 
     %   numCircles  Number of concentric integration circles for each center.
-    %               Default: numCircles = round(sqrt(3)*N).
+    %               Default: numCircles = Nr.
     %
     %
     % Based on Matlab code written: Per Christian Hansen, Jakob Sauer Jorgensen, and 
     % Maria Saxild-Hansen, 2010-2017 & Juergen Frikel, OTH Regensburg.
     """
-    def __init__(self, N,Nx,heights=None,numCircles=None,asMatrix=True):
-        self.N = N
-        self.Nx = Nx
+    def __init__(self, Nz, H, Nr, min_radius, max_radius, heights=None, numCircles=None):
+        self.Nz = Nz
+        self.H=H
+        self.Nr = Nr
+        self.min_radius  = min_radius
+        self.max_radius  = max_radius
         # Default value of the angles to the circle centers.
         if heights is None:
-            self.heights = np.arange(N)[::10]
+            self.heights = np.linspace(-0.5*H, 0.5*H, Nz)
         else:
             self.heights = heights
             
         if numCircles is None:
-            self.numCircles = int( np.round(np.sqrt(3.)*Nx) )
+            self.numCircles = np.ceil( np.sqrt(Nr*Nr+Nz*Nz) )
         else:
             self.numCircles = int( numCircles )
+
+        self.A = self._get_system_matrix(self.Nz, self.H, self.Nr, self.min_radius, self.max_radius,
+                                         self.heights, self.numCircles)
+
             
-        if asMatrix:
-            self.A = self._get_or_apply_system_matrix(self.N, self.Nx,self.heights, self.numCircles)
-        else:
-            self.A = None
-            
-        self.shape = [self.numCircles*len(self.heights), self.N*self.N]
+        self.shape = [self.numCircles*len(self.heights), self.Nz*self.Nr]
             
     def fwd(self, x):
-        if self.A is not None:
             return self.A*(x)
-        else:
-            return self._get_or_apply_system_matrix(self.N,self.Nx, self.angles,self.numCircles, x, False)
+
         
     def bwd(self, y):
-        if self.A is not None:
             return self.A.T*y
-        else:
-            return self._get_or_apply_system_matrix(self.N, self.Nx, self.angles,self.numCircles, y, True)
+
             
-    def _get_or_apply_system_matrix(self, N, Nx, heights, numCircles, u=None, adjoint=None):
+    def _get_system_matrix(self, Nz, H, Nr, min_radius, max_radius, heights, numCircles):
         # Define the number of angles.
         nH = len(heights)
+        h_max = np.max(heights)
         
         # Radii for the circles.
-        radii = np.linspace(0,np.sqrt(6),numCircles + 1)
+        radii = np.linspace(min_radius,np.sqrt(max_radius**2+0.25*(H+h_max)**2),numCircles + 1)
         radii  = radii[1:]
 
         # Image coordinates.
 
         # Determine the quarature parameters.
-        dx = np.sqrt(2.)/Nx
-        dr =  np.sqrt(6)/numCircles
-        nPhi = np.ceil((4.*np.pi/dx)*radii)
+        dz = H/Nz
+        dr = (max_radius-min_radius)/Nr
+        dzr_sqrt = np.sqrt(dz*dr)
+        nPhi = np.ceil((4.*np.pi/dzr_sqrt)*radii)
         dPhi = 2*np.pi/nPhi
         
         II = np.arange(nH)
         JJ = np.arange(numCircles)
-        
-        if u is None:
-            isMatrix = True
-        else:
-            isMatrix = False
 
-
-        if isMatrix:
-            # Initialize vectors that contains the row numbers, the column numbers
-            # and the values for creating the matrix A effiecently.
-            nnz = int(2*N*nH*numCircles)
-            rows = np.zeros( nnz, dtype=np.int32)
-            cols = np.zeros( nnz, dtype=np.int32)
-            vals = np.zeros( nnz, dtype=np.float64)
+        # Initialize vectors that contains the row numbers, the column numbers
+        # and the values for creating the matrix A effiecently.
+        nnz = int(np.sqrt(Nz*Nr)*nH*numCircles)
+        rows = np.zeros( nnz, dtype=np.int32)
+        cols = np.zeros( nnz, dtype=np.int32)
+        vals = np.zeros( nnz, dtype=np.float64)
             
-            idxend = 0
+        idxend = 0
 
-        else:
-            if adjoint == False:
-                assert u.shape[0] == self.N*self.N
-                A = np.zeros(numCircles*nH, dtype=np.float64)
-            else:
-                assert u.shape[0] == numCircles*nH
-                A = np.zeros(self.N*self.N, dtype=np.float64)
     
         # Loop over angles.
         for m in II: 
             # Angular position of source.
-            xix = heights[m]*np.sqrt(2)
+            ziz = heights[m]
     
             # Loop over the circles.
             for n in JJ:
                 # (x,y) coordinates of circle.
                 k = np.arange(nPhi[n])*dPhi[n]
-                xx =  N/2 + (xix + radii[n]*np.cos(k))/dx
-                yy = (radii[n]*np.sin(k))/dr# + centerImg
+                zz =  Nz/2 + (ziz + radii[n]*np.cos(k))/dz
+                rr = (radii[n]*np.sin(k) - min_radius)/dr# + centerImg
         
                 # Round to get pixel index.
-                col = np.round( xx )-1
-                row = np.round( yy )-1
+                z_index = np.round( zz )-1
+                r_index = np.round( rr )-1
         
                 # Discard if outside box domain.
-                IInew = np.logical_and(col>=0, col<N) & np.logical_and(row>=0, row<numCircles)
-                row = row[IInew]
-                col = col[IInew]
-                J = row + col*numCircles
+                IInew = np.logical_and(z_index>=0, z_index<Nz) & np.logical_and(r_index>=0, r_index<Nr)
+                r_index = r_index[IInew]
+                z_index = z_index[IInew]
+                J = r_index + z_index*Nr        #r_index is the fastest running index
         
                 # Convert to linear index and bin
                 Ju, w = np.unique(J, return_counts=True)
@@ -332,30 +288,23 @@ class CircularRadonTransform_ZR:
         
                 # Store the values, if any.
                 if jj.shape[0] > 0:
-                    if isMatrix:
-                        # Create the indices to store the values to vector for
-                        # later creation of A matrix.
-                        idxstart = idxend
-                        idxend = idxstart + jj.shape[0]
-                        idx = np.arange(idxstart, idxend)
+                    # Create the indices to store the values to vector for
+                    # later creation of A matrix.
+                    idxstart = idxend
+                    idxend = idxstart + jj.shape[0]
+                    idx = np.arange(idxstart, idxend)
                 
-                        # Store row numbers, column numbers and values.
-                        rows[idx] = ii
-                        cols[idx] = jj
-                        vals[idx] = aa
-                    else:
-                        # If any nonzero elements, apply forward or back operator
-                        if adjoint==False:
-                            A[i] = np.dot(aa, u[jj])
-                        else:
-                            A[jj] += u[i]*aa    
-        if isMatrix:
-            # Truncate excess zeros.
-            rows = rows[:idxend]
-            cols = cols[:idxend]
-            vals = vals[:idxend]
+                    # Store row numbers, column numbers and values.
+                    rows[idx] = ii
+                    cols[idx] = jj
+                    vals[idx] = aa
+
+        # Truncate excess zeros.
+        rows = rows[:idxend]
+        cols = cols[:idxend]
+        vals = vals[:idxend]
     
-            # Create sparse matrix A from the stored values.
-            A = scs.csr_matrix((vals, (rows,cols)), (self.numCircles*nH,self.N*numCircles) )/np.sqrt(2)
+        # Create sparse matrix A from the stored values.
+        A = scs.csr_matrix((vals, (rows,cols)), (self.numCircles*nH,self.Nz*self.Nr) )
         return A
 
