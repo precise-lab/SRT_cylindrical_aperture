@@ -12,11 +12,57 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.sparse.linalg as ssla
 from phantominator import shepp_logan
 
 import sys
 sys.path.append('../')
 from caSRT import *
+
+def test_adj(srt):
+    im_shape = srt.im_shape
+    data_shape = srt.data_shape
+
+    F = shepp_logan(im_shape)
+    print("Image size: {}".format(F.shape))
+
+    #Forward computation
+    measurements = srt.fwd(F)
+    measurements2 = np.random.randn(*data_shape)
+
+    print("Measurements size: {}".format(measurements.shape))
+    print("     Number of angles: {}".format(measurements.shape[0]))
+    print("     Number of heights: {}".format(measurements.shape[1]))
+    print("     Number of radii: {}".format(measurements.shape[2]))
+   
+
+    #Adjoint computation
+    adj = srt.bwd(measurements)
+    adj2 = srt.bwd(measurements2)
+
+    print("Adjoint size: {}".format(adj.shape))
+
+    #Inner product test:
+    m2_AF = np.sum(measurements2*measurements)
+    adj2_F = np.sum(adj2*F)
+
+    print("Adjoint test: ", 2*(m2_AF - adj2_F)/(np.abs(m2_AF) + np.abs(adj2_F)))
+
+def test_recon(srt):
+    F = shepp_logan(im_shape)
+    Y = srt.fwd(F)
+
+    sol = ssla.lsqr(srt, Y.flatten(), damp=1e-4, show=True)
+
+    print( np.linalg.norm(F.flatten()-sol[0])/np.linalg.norm(F.flatten()))
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     """
@@ -41,9 +87,7 @@ if __name__ == "__main__":
     heights = np.linspace(-H, H, Nh)
 
     dr = Lx/(3*im_shape[2])
-    
-    F = shepp_logan(im_shape)
-    print("Image size: {}".format(F.shape))
+
 
     Ayx = CircularRadonTransform(im_shape[2], Lx, R, angles = angles, dr = dr)
     Azr = CircularRadonTransform_ZR(im_shape[0], H, Ayx.numCircles,Ayx.min_radius,
@@ -52,25 +96,6 @@ if __name__ == "__main__":
 
     srt = SphericalRadonTransform(im_shape, data_shape, Ayx.A, Azr.A)
 
-    #Forward computation
-    measurements = srt.fwd(F)
-    measurements2 = np.random.randn(*data_shape)
-
-    print("Measurements size: {}".format(measurements.shape))
-    print("     Number of angles: {}".format(measurements.shape[0]))
-    print("     Number of heights: {}".format(measurements.shape[1]))
-    print("     Number of radii: {}".format(measurements.shape[2]))
-   
-
-    #Adjoint computation
-    adj = srt.bwd(measurements)
-    adj2 = srt.bwd(measurements2)
-
-    print("Adjoint size: {}".format(adj.shape))
-
-    #Inner product test:
-    m2_AF = np.sum(measurements2*measurements)
-    adj2_F = np.sum(adj2*F)
-
-    print("Adjoint test: ", 2*(m2_AF - adj2_F)/(np.abs(m2_AF) + np.abs(adj2_F)))
+    test_adj(srt)
+    test_recon(srt)
 

@@ -13,10 +13,11 @@
 import numpy as np
 import scipy as sc
 import scipy.sparse as scs
+import scipy.sparse.linalg as ssla
 
 from .CRT import *
 
-class SphericalRadonTransform:
+class SphericalRadonTransform(ssla.LinearOperator):
     """
     %SphericalRadonTransform  Creates a 3D spherical Radon tomography (SRT) test problem
     %
@@ -62,11 +63,17 @@ class SphericalRadonTransform:
         self.Ayx = scs.linalg.aslinearoperator(Ayx)
         self.Azr = scs.linalg.aslinearoperator(Azr)
 
-    def matvec(self,x):
+        self.shape = tuple([np.prod(self.data_shape), np.prod(self.im_shape)])
+        self.dtype = self.Ayx.dtype
+
+    def _matvec(self,x):
         return self.fwd(x.reshape(self.im_shape)).flatten()
     
-    def rmatvec(self,y):
-        return self.adj(y.reshape(self.data_shape)).flatten()
+    def _rmatvec(self,y):
+        return self.bwd(y.reshape(self.data_shape)).flatten()
+    
+    def _adjoint(self,y):
+        return self.bwd(y.reshape(self.data_shape)).flatten()
 
     def fwd(self,x):
         assert( x.shape == self.im_shape)
