@@ -27,32 +27,50 @@ if __name__ == "__main__":
 
 
     #Number of voxels in the x and y direction
-    Nx = 256
-    #Number of voxels in the z direction with isotropic pixel sizes
-    Nz = 128
+    im_shape = [128, 256, 256]
 
-    #Angles in the x,y direction for an assumed 
-    angles = 2*np.pi*np.arange(0,360,2)/360
-    #Heights at which SRT meaurements are computed
-    heights = np.linspace(-1/2,1/2,64)
+    # FOV size
+    Lx = Ly = 1.
+    H = .5
 
-    F = shepp_logan((Nx, Nx, Nz))
+    #Imager
+    R = 1.
+    Na = 360
+    angles = np.linspace(0, 2*np.pi, Na, endpoint=False)
+    Nh = im_shape[0]
+    heights = np.linspace(-H, H, Nh)
+
+    dr = Lx/(3*im_shape[2])
+    
+    F = shepp_logan(im_shape)
     print("Image size: {}".format(F.shape))
 
-    srt = SphericalRadonTransform(Nx, Nz, angles= angles, heights = heights)
+    Ayx = CircularRadonTransform(im_shape[2], Lx, R, angles = angles, dr = dr)
+    Azr = CircularRadonTransform_ZR(im_shape[0], H, Ayx.numCircles,Ayx.min_radius,
+                                    Ayx.max_radius, heights=heights)
+    data_shape = [Na, Nh, Azr.numCircles]
+
+    srt = SphericalRadonTransform(im_shape, data_shape, Ayx.A, Azr.A)
 
     #Forward computation
     measurements = srt.fwd(F)
+    measurements2 = np.random.randn(*data_shape)
 
     print("Measurements size: {}".format(measurements.shape))
-    print("     Number of heights: {}".format(measurements.shape[0]))
-    print("     Number of radii: {}".format(measurements.shape[1]))
-    print("     Number of angles: {}".format(measurements.shape[2]))
+    print("     Number of angles: {}".format(measurements.shape[0]))
+    print("     Number of heights: {}".format(measurements.shape[1]))
+    print("     Number of radii: {}".format(measurements.shape[2]))
+   
 
     #Adjoint computation
     adj = srt.bwd(measurements)
+    adj2 = srt.bwd(measurements2)
 
     print("Adjoint size: {}".format(adj.shape))
 
+    #Inner product test:
+    m2_AF = np.sum(measurements2*measurements)
+    adj2_F = np.sum(adj2*F)
 
+    print("Adjoint test: ", 2*(m2_AF - adj2_F)/(np.abs(m2_AF) + np.abs(adj2_F)))
 

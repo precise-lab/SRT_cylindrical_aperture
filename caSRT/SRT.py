@@ -42,74 +42,74 @@ class SphericalRadonTransform:
     %   448.1 (2017): 567-579.
     %
     % Input:
-    %   N           Scalar denoting the number of pixels in the x and y dimesion, such
-    %               that the each axial slice consists of N^2 cells.
-    %   Nz          Scalar denoting the number of pixels in the z dimesion, such
-    %               that the image domain consists of N^2*Nz cells.
-    %   angles      Vector containing the angles to the circle centers in the 
-    %               (x,y)-plane in radians. Default: angles = 2*pi*(0:2:358)/360.
-    %   heights     Vector containing the heights in the z-plane for measurements.
-    %               Default: heights = 2*pi*(0:2:358)/360.
-    %   numCircles  Number of concentric integration circles for each center.
-    %               Default: numCircles = round(sqrt(2)*N).
-    %   asMatrix    If True, a sparse matrix is returned in A (default).
-    %               If False, instead a function handle is returned.
+    %       im_shape: Shape of the image Nz x Ny x Nx. We assume Ny = Nx
+    %.      data_shape: Shape of the data Nviews x Nheights x Ncircles
+    %       Axy: Circular Radon transform matrix in the xy plane. Number of rows:
+    %            Nviews*Ncircles; number of columns Nx*Ny
+    %       Azr: Circular Radon transform matrix in the zr plane. Number of rows: 
+    %            Nheights*Ncircles; Number of columns Ny*Ncircles     
     %
     % Output:
-    %   A           If input isMatrix is True (default): coefficient matrix with
-    %               N^2*Nz columns and length(angles)*len(heights)*numCircles rows.
-    %               If input isMatrix is False: A function handle representing a
-    %               matrix-free version of A in which the forward and backward
-    %               operations are computed as A.fwd(x) and A.bwd(y),
-    %               respectively, for column vectors x and y of appropriate size.
-    %               The matrix is never formed explicitly, thus saving memory.
+    %   A         The matrix is never formed explicitly, thus saving memory.
     %
     %
     % Based on Matlab code written: Per Christian Hansen, Jakob Sauer Jorgensen, and 
     % Maria Saxild-Hansen, 2010-2017 & Juergen Frikel, OTH Regensburg.
     """
-    def __init__(self, N, Nz,angles=None,heights = None,numCircles=None):
-        self.N = N
-        self.Nz = Nz
-        if angles is None:
-            self.angles = np.arange(0, 359, 2)*np.pi/180.
-        else:
-            self.angles = angles
-        if numCircles is None:
-            self.numCircles = int( np.round(np.sqrt(3.)*N) )
-        else:
-            self.numCircles = int( numCircles )
-        if heights is None:
-            self.heights = np.arange(N)[::10]
-        else:
-            self.heights = heights
+    def __init__(self, im_shape, data_shape, Ayx, Azr):
+        self.im_shape = tuple(im_shape)
+        self.data_shape = tuple(data_shape)
+        self.Ayx = scs.linalg.aslinearoperator(Ayx)
+        self.Azr = scs.linalg.aslinearoperator(Azr)
 
-        self.Axy = CircularRadonTransform(N, angles = self.angles, numCircles= self.numCircles)
-        self.Azr = CircularRadonTransform_ZR(Nz, N, heights = self.heights, numCircles=self.numCircles)
+    def matvec(self,x):
+        return self.fwd(x.reshape(self.im_shape)).flatten()
+    
+    def rmatvec(self,y):
+        return self.adj(y.reshape(self.data_shape)).flatten()
+
     def fwd(self,x):
-        Na = len(self.angles)
-        Nz = len(self.heights)
+        assert( x.shape == self.im_shape)
         
-        x = x.reshape((self.N**2,self.Nz))
-        bxy = self.Axy.fwd(x)
-        bxy = bxy.reshape((Na,self.numCircles, self.Nz))
-        bxy = np.transpose(bxy, axes = [2, 1, 0])
-        bxy = bxy.reshape((self.numCircles*self.Nz, Na))
+        Na = self.data_shape[0]
+        Nh = self.data_shape[1]
+        numCircles = self.data_shape[2]
+        Nr = self.Ayx.shape[0]//Na
+        assert( Nr*Na == self.Ayx.shape[0])
 
-        bzr = self.Azr.fwd(bxy)
+        Nx = self.im_shape[2]
+        Ny = self.im_shape[1]
+        Nz = self.im_shape[0]
+        
+        b = np.transpose( x.reshape(Nz,Nx*Ny), [1,0])
+        b = self.Ayx.matmat(b) #NaNr times NZ
+        b = b.reshape((Na,Nr, Nz)) #Na times Nr times Nz
+        b = np.transpose(b, axes = [2, 1, 0]) #Nz times Nr times Na
+        b = b.reshape((Nz*Nr, Na)) #NzNr times Na
 
-        return bzr.reshape((Nz, self.numCircles, Na))
+        bzr = self.Azr.matmat(b) #NhNr times Na
+        
+        return np.transpose( bzr.reshape((Nh, numCircles, Na)), [2,0,1])
+    
     def bwd(self,y):
-        Na = len(self.angles)
-        Nz = len(self.heights)
+        assert (y.shape==self.data_shape) #Nviews x Nheights x Ncircles
+        Na = self.data_shape[0]
+        Nh = self.data_shape[1]
+        numCircles = self.data_shape[2]
+        Nr = self.Ayx.shape[0]//Na
+        assert( Nr*Na == self.Ayx.shape[0])
+
+        Nx = self.im_shape[2]
+        Ny = self.im_shape[1]
+        Nz = self.im_shape[0]
 
 
-        y = y.reshape((Nz*self.numCircles, Na))
-        y = self.Azr.bwd(y)
-        y = y.reshape((self.Nz, self.numCircles,Na))
-        y = np.transpose(y, axes = [2, 1, 0])
+        x = np.transpose( y.reshape((Na, Nh*numCircles)), [1,0]) #NheightsNcircles x Nviews
+        x = self.Azr.rmatmat(x) #NzNr x Nviews
+        x = x.reshape((Nz, Nr, Na))  #Nz x Nr x Nviews
+        x = np.transpose(x, axes = [2, 1, 0]) #Nviews x Ncircles x Nz
 
-        y = y.reshape((self.numCircles*Na,self.Nz))
-        y = self.Axy.bwd(y)
+        x = x.reshape((Na*Nr,Nz))
+        x = self.Ayx.rmatmat(x) #NyNx x Nz
 
-        return y.reshape((self.N,self.N,self.Nz))
+        return np.transpose(x, [1,0]).reshape(self.im_shape)

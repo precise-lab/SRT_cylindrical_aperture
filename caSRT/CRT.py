@@ -36,20 +36,23 @@ class CircularRadonTransform:
     %   R           Radius of detection geometry. Default = sqrt(2)/2*L
     %   angles      Vector containing the angles to the circle centers in
     %               radians. Default: angles = 2*pi*(0:2:358)/360.
-    %   numCircles  Number of concentric integration circles for each center.
-    %               Default: numCircles = round(sqrt(2)*N).
+    %   dr          Distance between circles.
+    %               Default: dr = L/(sqrt(2) * N 
     % Output:
     %   A           If input isMatrix is True (default): coefficient matrix with
-    %               N^2 columns and length(angles)*numCircles rows.
-    %               The matrix assumes that the image is vectorized with the fastest
-    %               running index corresponding to the x-axis.
+    %               N^2 columns and length(angles)xnumCircles rows.
+    %               The matrix assumes that:
+    %               1. The image is vectorized with the fastest running index
+    %                  corresponding to the x-axis
+    %               2. The measuraments are vectorized with the fastest running index
+    %                  corresponding to the radius of the circle 
     %               
     %
     %
     % Based on Matlab code written: Per Christian Hansen, Jakob Sauer Jorgensen, and 
     % Maria Saxild-Hansen, 2010-2017 & Juergen Frikel, OTH Regensburg.
     """
-    def __init__(self,N,L,R,angles=None,numCircles=None):
+    def __init__(self,N,L,R,angles=None,dr = None):
         self.N = N
         self.L = L
         self.R = R
@@ -59,12 +62,18 @@ class CircularRadonTransform:
         else:
             self.angles = angles
             
-        if numCircles is None:
-            self.numCircles = int( np.round(np.sqrt(3.)*N) )
+        if dr is None:
+            self.dr = self.L/(np.sqrt(2.)*self.N)
         else:
-            self.numCircles = int( numCircles )
-            
-        self.A = self._get_system_matrix(self.N, L, R, self.angles, self.numCircles)
+            self.dr = dr
+
+        # Radii for the circles.
+        self.min_radius = R - 0.5*np.sqrt(2)*L
+        self.max_radius = R + 0.5*np.sqrt(2)*L
+        self.radii  = np.arange(self.min_radius+self.dr, self.max_radius+0.5*self.dr, dr)
+        self.numCircles = self.radii.shape[0]
+
+        self.A = self._get_system_matrix(self.N, L, R, self.angles, self.radii)
 
             
         self.shape = [self.numCircles*self.angles.shape[0], self.N*self.N]
@@ -77,16 +86,11 @@ class CircularRadonTransform:
             return self.A.T*y
 
             
-    def _get_system_matrix(self, N, L, R, angles, numCircles):
+    def _get_system_matrix(self, N, L, R, angles, radii):
         # Define the number of angles.
         nA = angles.shape[0]
+        numCircles = radii.shape[0]
         
-        # Radii for the circles.
-        min_radius = R - 0.5*np.sqrt(2)*L
-        max_radius = R + 0.5*np.sqrt(2)*L
-        radii  = np.linspace(min_radius, max_radius,numCircles+1)
-        radii  = radii[1:]
-
         # Image coordinates.
         centerImg = np.floor(N/2)
 
@@ -186,14 +190,12 @@ class CircularRadonTransform_ZR:
     %   Nr          Scalar denoting the number of pixels in the radial 
     %               directions such that the image domain consists of Nz*Nr
     %   heights     Vector containing the normalized column heights 
-    %   numCircles  Number of concentric integration circles for each center.
-    %               Default: numCircles = Nr.
     %
     %
     % Based on Matlab code written: Per Christian Hansen, Jakob Sauer Jorgensen, and 
     % Maria Saxild-Hansen, 2010-2017 & Juergen Frikel, OTH Regensburg.
     """
-    def __init__(self, Nz, H, Nr, min_radius, max_radius, heights=None, numCircles=None):
+    def __init__(self, Nz, H, Nr, min_radius, max_radius, heights=None):
         self.Nz = Nz
         self.H=H
         self.Nr = Nr
@@ -205,13 +207,9 @@ class CircularRadonTransform_ZR:
         else:
             self.heights = heights
             
-        if numCircles is None:
-            self.numCircles = np.ceil( np.sqrt(Nr*Nr+Nz*Nz) )
-        else:
-            self.numCircles = int( numCircles )
 
-        self.A = self._get_system_matrix(self.Nz, self.H, self.Nr, self.min_radius, self.max_radius,
-                                         self.heights, self.numCircles)
+        self.A, self.numCircles = self._get_system_matrix(self.Nz, self.H, self.Nr, self.min_radius,
+                                         self.max_radius, self.heights)
 
             
         self.shape = [self.numCircles*len(self.heights), self.Nz*self.Nr]
@@ -224,20 +222,20 @@ class CircularRadonTransform_ZR:
             return self.A.T*y
 
             
-    def _get_system_matrix(self, Nz, H, Nr, min_radius, max_radius, heights, numCircles):
+    def _get_system_matrix(self, Nz, H, Nr, min_radius, max_radius, heights):
         # Define the number of angles.
         nH = len(heights)
         h_max = np.max(heights)
         
         # Radii for the circles.
-        radii = np.linspace(min_radius,np.sqrt(max_radius**2+0.25*(H+h_max)**2),numCircles + 1)
-        radii  = radii[1:]
+        dr = (max_radius-min_radius)/Nr
+        radii = np.arange(min_radius+dr,np.sqrt(max_radius**2+0.25*(H+h_max)**2)+0.5*dr,dr)
+        numCircles = radii.shape[0]
 
         # Image coordinates.
 
         # Determine the quarature parameters.
         dz = H/Nz
-        dr = (max_radius-min_radius)/Nr
         dzr_sqrt = np.sqrt(dz*dr)
         nPhi = np.ceil((4.*np.pi/dzr_sqrt)*radii)
         dPhi = 2*np.pi/nPhi
@@ -305,6 +303,6 @@ class CircularRadonTransform_ZR:
         vals = vals[:idxend]
     
         # Create sparse matrix A from the stored values.
-        A = scs.csr_matrix((vals, (rows,cols)), (self.numCircles*nH,self.Nz*self.Nr) )
-        return A
+        A = scs.csr_matrix((vals, (rows,cols)), (numCircles*nH,self.Nz*self.Nr) )
+        return A, numCircles
 

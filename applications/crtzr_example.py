@@ -43,14 +43,14 @@ if __name__ == "__main__":
     heights = np.linspace(-H, H, Nh)
 
 
-    numCircles = int(np.sqrt(Nz*Nz + Nr*Nr))*3
     F = skitr.resize(shepp_logan_phantom(), [Nz,Nr])
     f = F.flatten()
     print("Image size: {}".format(F.shape))
 
 
 
-    crt = CircularRadonTransform_ZR(Nz, H, Nr, min_radius, max_radius, heights=heights, numCircles= numCircles)
+    crt = CircularRadonTransform_ZR(Nz, H, Nr, min_radius, max_radius, heights=heights)
+    numCircles = crt.numCircles
 
     #Forward computation
     measurements = crt.fwd(F.flatten()).reshape((Nh,numCircles))
@@ -79,6 +79,6 @@ if __name__ == "__main__":
     plt.subplot(1,3,3)
     plt.imshow(np.abs(F-hatF))
     plt.colorbar()
-    plt.show()
+    plt.savefig("crt_zr.png")
    
 

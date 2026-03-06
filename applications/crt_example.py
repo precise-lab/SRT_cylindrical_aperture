@@ -42,9 +42,10 @@ if __name__ == "__main__":
     f = F.flatten()
     print("Image size: {}".format(F.shape))
 
-    numCircles = int(np.sqrt(2)*Nx)*3
+    dr = L/(np.sqrt(2.)*Nx)
 
-    crt = CircularRadonTransform(Nx, L, R, angles = angles, numCircles= numCircles)
+    crt = CircularRadonTransform(Nx, L, R, angles = angles, dr = dr)
+    numCircles = crt.numCircles
 
     #Forward computation
     measurements = crt.fwd(F.flatten()).reshape((Na,numCircles))
