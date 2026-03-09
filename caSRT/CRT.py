@@ -13,6 +13,9 @@ import numpy as np
 import scipy as sc
 import scipy.sparse as scs
 
+import cupy as cp
+import cupyx
+
 class CircularRadonTransform:
 
     """
@@ -84,6 +87,9 @@ class CircularRadonTransform:
         
     def bwd(self, y):
             return self.A.T*y
+    
+    def tocuda(self):
+         return cupyx.scipy.sparse.csr_matrix(self.A, dtype=cp.float32)
 
             
     def _get_system_matrix(self, N, L, R, angles, radii):
