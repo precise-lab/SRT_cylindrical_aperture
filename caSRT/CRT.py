@@ -226,6 +226,9 @@ class CircularRadonTransform_ZR:
         
     def bwd(self, y):
             return self.A.T*y
+    
+    def tocuda(self):
+         return cupyx.scipy.sparse.csr_matrix(self.A, dtype=cp.float32)
 
             
     def _get_system_matrix(self, Nz, H, Nr, min_radius, max_radius, heights):

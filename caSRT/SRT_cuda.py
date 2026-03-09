@@ -12,11 +12,11 @@
 
 import numpy as np
 import cupy as cp
-import cupyx.scipy.sparse.linalg as cpla
+import pylops 
 
 from .CRT import *
 
-class SphericalRadonTransform(cpla.LinearOperator):
+class SphericalRadonTransform(pylops.LinearOperator):
     """
     %SphericalRadonTransform  Creates a 3D spherical Radon tomography (SRT) test problem
     %
@@ -59,11 +59,12 @@ class SphericalRadonTransform(cpla.LinearOperator):
     def __init__(self, im_shape, data_shape, Ayx, Azr):
         self.im_shape = tuple(im_shape)
         self.data_shape = tuple(data_shape)
-        self.Ayx = cpla.aslinearoperator(Ayx)
-        self.Azr = cpla.linalg.aslinearoperator(Azr)
+        self.Ayx = pylops.MatrixMult(Ayx)
+        self.Azr = pylops.MatrixMult(Azr)
 
         self.shape = tuple([np.prod(self.data_shape), np.prod(self.im_shape)])
         self.dtype = self.Ayx.dtype
+        self.explicit = False
 
     def _matvec(self,x):
         return self.fwd(x.reshape(self.im_shape)).flatten()
