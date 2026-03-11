@@ -29,41 +29,46 @@ if __name__ == "__main__":
 
 
     #Number of voxels in the x and y direction
-    Nx = 256
-    L = 1
-    R = 2 #.5*np.sqrt(2)*L
+    Nz = 128
+    Nr = 256
+
+    H = 1
+    min_radius = 0.1
+    max_radius = 1.1
 
     #Angles in the x,y direction for an assumed 
-    Na = 360
-    angles = 2*np.pi*np.arange(Na)/Na
-    #Heights at which SRT meaurements are computed
+    Nh = 512
 
-    F = skitr.resize(shepp_logan_phantom(), [Nx,Nx])
+    #Heights at which SRT meaurements are computed
+    heights = np.linspace(-H, H, Nh)
+
+
+    F = skitr.resize(shepp_logan_phantom(), [Nz,Nr])
     f = F.flatten()
     print("Image size: {}".format(F.shape))
 
-    dr = L/(np.sqrt(2.)*Nx)
 
-    crt = CircularRadonTransform(Nx, L, R, angles = angles, dr = dr)
+
+    crt = CircularRadonTransform_ZR(Nz, H, Nr, min_radius, max_radius, heights=heights)
     numCircles = crt.numCircles
 
     #Forward computation
-    measurements = crt.fwd(F.flatten()).reshape((Na,numCircles))
+    measurements = crt.fwd(F.flatten()).reshape((Nh,numCircles))
 
     print("Measurements size: {}".format(measurements.shape))
     print("     Number of radii: {}".format(numCircles))
-    print("     Number of angles: {}".format(Na))
+    print("     Number of heights: {}".format(Nh))
 
     #Adjoint computation
-    adj = crt.bwd(measurements.flatten()).reshape((Nx,Nx))
+    adj = crt.bwd(measurements.flatten()).reshape((Nz,Nr))
 
     print("Adjoint size: {}".format(adj.shape))
 
-    sol = ssla.lsqr(crt.A, measurements.flatten(), damp=1e-4, show=True)
+    sol = ssla.lsqr(crt.A, measurements.flatten(), damp=1e-2, show=True)
 
     print( np.linalg.norm(f-sol[0])/np.linalg.norm(f))
 
-    hatF=sol[0].reshape(Nx,Nx)
+    hatF=sol[0].reshape(Nz,Nr)
 
     plt.subplot(1,3,1)
     plt.imshow(F)
@@ -74,6 +79,6 @@ if __name__ == "__main__":
     plt.subplot(1,3,3)
     plt.imshow(np.abs(F-hatF))
     plt.colorbar()
-    plt.show()
+    plt.savefig("crt_zr.png")
    
 

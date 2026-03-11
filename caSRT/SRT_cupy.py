@@ -11,13 +11,12 @@
 # Software Foundation) version 3.0 dated June 2007.
 
 import numpy as np
-import scipy as sc
-import scipy.sparse as scs
-import scipy.sparse.linalg as ssla
+import cupy as cp
+import pylops 
 
 from .CRT import *
 
-class SphericalRadonTransform(ssla.LinearOperator):
+class SphericalRadonTransformGPU(pylops.LinearOperator):
     """
     %SphericalRadonTransform  Creates a 3D spherical Radon tomography (SRT) test problem
     %
@@ -60,11 +59,15 @@ class SphericalRadonTransform(ssla.LinearOperator):
     def __init__(self, im_shape, data_shape, Ayx, Azr):
         self.im_shape = tuple(im_shape)
         self.data_shape = tuple(data_shape)
-        self.Ayx = scs.linalg.aslinearoperator(Ayx)
-        self.Azr = scs.linalg.aslinearoperator(Azr)
+        self.Ayx = pylops.MatrixMult(Ayx)
+        self.Azr = pylops.MatrixMult(Azr)
 
+        #Pylops compatibility
         self.shape = tuple([np.prod(self.data_shape), np.prod(self.im_shape)])
         self.dtype = self.Ayx.dtype
+        self.explicit = False
+        self.matvec_count = 0
+        self.rmatvec_count = 0
 
     def _matvec(self,x):
         return self.fwd(x.reshape(self.im_shape)).flatten()
@@ -88,15 +91,15 @@ class SphericalRadonTransform(ssla.LinearOperator):
         Ny = self.im_shape[1]
         Nz = self.im_shape[0]
         
-        b = np.transpose( x.reshape(Nz,Nx*Ny), [1,0])
+        b = cp.transpose( x.reshape(Nz,Nx*Ny), [1,0])
         b = self.Ayx.matmat(b) #NaNr times NZ
         b = b.reshape((Na,Nr, Nz)) #Na times Nr times Nz
-        b = np.transpose(b, axes = [2, 1, 0]) #Nz times Nr times Na
+        b = cp.transpose(b, axes = [2, 1, 0]) #Nz times Nr times Na
         b = b.reshape((Nz*Nr, Na)) #NzNr times Na
 
         bzr = self.Azr.matmat(b) #NhNr times Na
         
-        return np.transpose( bzr.reshape((Nh, numCircles, Na)), [2,0,1])
+        return cp.transpose( bzr.reshape((Nh, numCircles, Na)), [2,0,1])
     
     def bwd(self,y):
         assert (y.shape==self.data_shape) #Nviews x Nheights x Ncircles
@@ -111,12 +114,12 @@ class SphericalRadonTransform(ssla.LinearOperator):
         Nz = self.im_shape[0]
 
 
-        x = np.transpose( y.reshape((Na, Nh*numCircles)), [1,0]) #NheightsNcircles x Nviews
+        x = cp.transpose( y.reshape((Na, Nh*numCircles)), [1,0]) #NheightsNcircles x Nviews
         x = self.Azr.rmatmat(x) #NzNr x Nviews
         x = x.reshape((Nz, Nr, Na))  #Nz x Nr x Nviews
-        x = np.transpose(x, axes = [2, 1, 0]) #Nviews x Ncircles x Nz
+        x = cp.transpose(x, axes = [2, 1, 0]) #Nviews x Ncircles x Nz
 
         x = x.reshape((Na*Nr,Nz))
         x = self.Ayx.rmatmat(x) #NyNx x Nz
 
-        return np.transpose(x, [1,0]).reshape(self.im_shape)
+        return cp.transpose(x, [1,0]).reshape(self.im_shape)

@@ -11,8 +11,9 @@
 # Software Foundation) version 3.0 dated June 2007.
 
 import numpy as np
+import cupy as cp
 import matplotlib.pyplot as plt
-import scipy.sparse.linalg as ssla
+import pylops
 from phantominator import shepp_logan
 
 import sys
@@ -23,12 +24,13 @@ def test_adj(srt):
     im_shape = srt.im_shape
     data_shape = srt.data_shape
 
-    F = shepp_logan(im_shape)
-    print("Image size: {}".format(F.shape))
+    F_np = shepp_logan(im_shape)
+    print("Image size: {}".format(F_np.shape))
+    F = cp.array(F_np, dtype=np.float32)
 
     #Forward computation
     measurements = srt.fwd(F)
-    measurements2 = np.random.randn(*data_shape)
+    measurements2 = cp.random.randn(*data_shape, dtype=np.float32)
 
     print("Measurements size: {}".format(measurements.shape))
     print("     Number of angles: {}".format(measurements.shape[0]))
@@ -43,18 +45,43 @@ def test_adj(srt):
     print("Adjoint size: {}".format(adj.shape))
 
     #Inner product test:
-    m2_AF = np.sum(measurements2*measurements)
-    adj2_F = np.sum(adj2*F)
+    m2_AF = cp.sum(measurements2*measurements)
+    adj2_F = cp.sum(adj2*F)
 
     print("Adjoint test: ", 2*(m2_AF - adj2_F)/(np.abs(m2_AF) + np.abs(adj2_F)))
 
 def test_recon(srt):
-    F = shepp_logan(im_shape)
+    F_np = shepp_logan(im_shape)
+    F = cp.array(F_np, dtype = np.float32)
     Y = srt.fwd(F)
 
-    sol = ssla.lsqr(srt, Y.flatten(), damp=1e-4, show=True)
+    sol = pylops.optimization.basic.lsqr(srt, Y.flatten(), cp.zeros_like(F.flatten()), damp=1e-4, niter = 10000, show=True)
 
-    print( np.linalg.norm(F.flatten()-sol[0])/np.linalg.norm(F.flatten()))
+    f_hat = sol[0]
+    F_hat = cp.reshape(f_hat, srt.im_shape)
+    F_hat_np = cp.asnumpy(F_hat)
+
+    plt.subplot(2,3,1)
+    plt.imshow(F_np[64,:,:])
+    plt.colorbar()
+    plt.subplot(2,3,2)
+    plt.imshow(F_hat_np[64,:,:])
+    plt.colorbar()
+    plt.subplot(2,3,3)
+    plt.imshow(np.abs(F_np[64,:,:] -F_hat_np[64,:,:] ))
+    plt.colorbar()
+    plt.subplot(2,3,4)
+    plt.imshow(F_np[:,128,:])
+    plt.colorbar()
+    plt.subplot(2,3,5)
+    plt.imshow(F_hat_np[:,128,:])
+    plt.colorbar()
+    plt.subplot(2,3,6)
+    plt.imshow(np.abs(F_np[:,128,:] -F_hat_np[:,128,:] ))
+    plt.colorbar()
+    plt.savefig("3d_slice.png")
+
+    print( cp.linalg.norm(F.flatten()-sol[0])/cp.linalg.norm(F.flatten()))
 
 
 
@@ -80,13 +107,13 @@ if __name__ == "__main__":
     H = .5
 
     #Imager
-    R = 1.
+    R = 0.75
     Na = 360
     angles = np.linspace(0, 2*np.pi, Na, endpoint=False)
-    Nh = im_shape[0]
+    Nh = 2*im_shape[0]
     heights = np.linspace(-H, H, Nh)
 
-    dr = Lx/(3*im_shape[2])
+    dr = Lx/(2*im_shape[2])
 
 
     Ayx = CircularRadonTransform(im_shape[2], Lx, R, angles = angles, dr = dr)
@@ -94,7 +121,7 @@ if __name__ == "__main__":
                                     Ayx.max_radius, heights=heights)
     data_shape = [Na, Nh, Azr.numCircles]
 
-    srt = SphericalRadonTransform(im_shape, data_shape, Ayx.A, Azr.A)
+    srt = SphericalRadonTransformGPU(im_shape, data_shape, Ayx.tocuda(), Azr.tocuda())
 
     test_adj(srt)
     test_recon(srt)
