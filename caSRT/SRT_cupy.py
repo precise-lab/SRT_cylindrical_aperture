@@ -16,7 +16,7 @@ import pylops
 
 from .CRT import *
 
-class SphericalRadonTransform(pylops.LinearOperator):
+class SphericalRadonTransformGPU(pylops.LinearOperator):
     """
     %SphericalRadonTransform  Creates a 3D spherical Radon tomography (SRT) test problem
     %
@@ -62,9 +62,12 @@ class SphericalRadonTransform(pylops.LinearOperator):
         self.Ayx = pylops.MatrixMult(Ayx)
         self.Azr = pylops.MatrixMult(Azr)
 
+        #Pylops compatibility
         self.shape = tuple([np.prod(self.data_shape), np.prod(self.im_shape)])
         self.dtype = self.Ayx.dtype
         self.explicit = False
+        self.matvec_count = 0
+        self.rmatvec_count = 0
 
     def _matvec(self,x):
         return self.fwd(x.reshape(self.im_shape)).flatten()

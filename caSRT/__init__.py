@@ -11,3 +11,4 @@
 # Software Foundation) version 3.0 dated June 2007.
 from .SRT import *
 from .CRT import *
+from .SRT_cupy import *
