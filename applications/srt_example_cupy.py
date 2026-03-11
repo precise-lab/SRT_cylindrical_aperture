@@ -55,20 +55,29 @@ def test_recon(srt):
     F = cp.array(F_np, dtype = np.float32)
     Y = srt.fwd(F)
 
-    sol = pylops.optimization.basic.lsqr(srt, Y.flatten(), cp.zeros_like(F.flatten()), damp=1e-2, niter = 10000, show=True)
+    sol = pylops.optimization.basic.lsqr(srt, Y.flatten(), cp.zeros_like(F.flatten()), damp=1e-4, niter = 10000, show=True)
 
     f_hat = sol[0]
     F_hat = cp.reshape(f_hat, srt.im_shape)
     F_hat_np = cp.asnumpy(F_hat)
 
-    plt.subplot(1,3,1)
+    plt.subplot(2,3,1)
     plt.imshow(F_np[64,:,:])
     plt.colorbar()
-    plt.subplot(1,3,2)
+    plt.subplot(2,3,2)
     plt.imshow(F_hat_np[64,:,:])
     plt.colorbar()
-    plt.subplot(1,3,3)
+    plt.subplot(2,3,3)
     plt.imshow(np.abs(F_np[64,:,:] -F_hat_np[64,:,:] ))
+    plt.colorbar()
+    plt.subplot(2,3,4)
+    plt.imshow(F_np[:,128,:])
+    plt.colorbar()
+    plt.subplot(2,3,5)
+    plt.imshow(F_hat_np[:,128,:])
+    plt.colorbar()
+    plt.subplot(2,3,6)
+    plt.imshow(np.abs(F_np[:,128,:] -F_hat_np[:,128,:] ))
     plt.colorbar()
     plt.savefig("3d_slice.png")
 
@@ -98,13 +107,13 @@ if __name__ == "__main__":
     H = .5
 
     #Imager
-    R = 1.
+    R = 0.75
     Na = 360
     angles = np.linspace(0, 2*np.pi, Na, endpoint=False)
-    Nh = im_shape[0]
+    Nh = 2*im_shape[0]
     heights = np.linspace(-H, H, Nh)
 
-    dr = Lx/(3*im_shape[2])
+    dr = Lx/(2*im_shape[2])
 
 
     Ayx = CircularRadonTransform(im_shape[2], Lx, R, angles = angles, dr = dr)
